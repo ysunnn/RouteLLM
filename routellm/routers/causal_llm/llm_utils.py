@@ -27,7 +27,7 @@ def load_prompt_format(model_id):
 def get_model(config: RouterModelConfig, model_ckpt: str, pad_token_id: int = 2):
     if config.model_type == ModelTypeEnum.CAUSAL:
         return AutoModelForCausalLM.from_pretrained(
-            model_ckpt,
+            model_ckpt = "distilgpt2",
             trust_remote_code=True,
             torch_dtype=torch.bfloat16,
             use_cache=False,

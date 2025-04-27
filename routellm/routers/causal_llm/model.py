@@ -41,7 +41,7 @@ class CausalLLMClassifier:
             assert f"[[{i}]]" in config.special_tokens
 
         model = get_model(config=config, model_ckpt=ckpt_local_path)
-        self.model = model.to("cuda").eval()
+        self.model = model.to("cpu").eval()
 
         self.prompt_format = prompt_format
         self.use_last_turn = use_last_turn
@@ -83,7 +83,7 @@ class CausalLLMClassifier:
 
     def __call__(self, row):
         row = self.preprocess(row)
-        input_ids = torch.as_tensor(row["input_ids"]).to("cuda").reshape(1, -1)
+        input_ids = torch.as_tensor(row["input_ids"]).to("cpu").reshape(1, -1)
         with torch.no_grad():
             output_new = self.model.generate(
                 input_ids,

@@ -11,10 +11,10 @@ from openai import OpenAI
 # Argument parser setup
 parser = argparse.ArgumentParser(description="Chatbot Interface for RouteLLM")
 parser.add_argument(
-    "--model-url", type=str, default="http://localhost:6060/v1", help="Model URL"
+    "--model-url", type=str, default="http://localhost:11434/", help="Model URL"
 )
 parser.add_argument(
-    "-r", "--router", type=str, required=True, help="Router name to use for the chatbot"
+    "-r", "--router", type=str, required=True, default="causal_llm", help="Router name to use for the chatbot"
 )
 parser.add_argument(
     "--threshold", type=float, required=True, help="Cost threshold to use for routing"

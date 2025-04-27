@@ -136,7 +136,7 @@ def train_loops(
     weight_decay,
     alpha,
     num_epochs,
-    device="cuda",
+    device="cpu",
     evaluator=evaluator,
     **kwargs,
 ):
@@ -239,7 +239,7 @@ if __name__ == "__main__":
         num_prompts=len(data),
         use_proj=use_proj,
         npy_path=npy_path,
-    ).to("cuda")
+    ).to("cpu")
 
     train_loops(
         model,
@@ -249,5 +249,5 @@ if __name__ == "__main__":
         weight_decay=weight_decay,
         alpha=alpha,
         num_epochs=num_epochs,
-        device="cuda",
+        device="cpu",
     )

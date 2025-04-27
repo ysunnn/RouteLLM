@@ -1,16 +1,19 @@
 from collections import defaultdict
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Union
 
 import pandas as pd
+import time
+import shortuuid  # make sure you have this module installed
 from litellm import acompletion, completion
+import litellm
 from tqdm import tqdm
 
-from routellm.routers.routers import ROUTER_CLS
+# Set drop_params if required by your setup
+litellm.drop_params = True
 
-# Default config for routers augmented using golden label data from GPT-4.
-# This is exactly the same as config.example.yaml.
+# Default configuration for routers augmented using golden label data from GPT-4.
 GPT_4_AUGMENTED_CONFIG = {
     "sw_ranking": {
         "arena_battle_datasets": [
@@ -48,11 +51,13 @@ class Controller:
         api_base: Optional[str] = None,
         api_key: Optional[str] = None,
         progress_bar: bool = False,
+        api_version: Optional[str] = None,  # NEW optional parameter
     ):
         self.model_pair = ModelPair(strong=strong_model, weak=weak_model)
         self.routers = {}
         self.api_base = api_base
         self.api_key = api_key
+        self.api_version = api_version  # store api_version if provided
         self.model_counts = defaultdict(lambda: defaultdict(int))
         self.progress_bar = progress_bar
 
@@ -64,12 +69,14 @@ class Controller:
             router_pbar = tqdm(routers)
             tqdm.pandas()
 
+        # Assume ROUTER_CLS is a dict mapping router names to router objects/constructors.
+        from routellm.routers.routers import ROUTER_CLS  # adjust the import as needed
         for router in routers:
             if router_pbar is not None:
                 router_pbar.set_description(f"Loading {router}")
             self.routers[router] = ROUTER_CLS[router](**config.get(router, {}))
 
-        # Some Python magic to match the OpenAI Python SDK
+        # Create a chat namespace resembling the OpenAI Python SDK interface.
         self.chat = SimpleNamespace(
             completions=SimpleNamespace(
                 create=self.completion, acreate=self.acompletion
@@ -91,30 +98,23 @@ class Controller:
             )
 
     def _parse_model_name(self, model: str):
-        _, router, threshold = model.split("-", 2)
+        # Expect format: router-[router_name]-[threshold]
         try:
-            threshold = float(threshold)
-        except ValueError as e:
-            raise RoutingError(f"Threshold {threshold} must be a float.") from e
-        if not model.startswith("router"):
-            raise RoutingError(
-                f"Invalid model {model}. Model name must be of the format 'router-[router name]-[threshold]."
-            )
+            _, router, threshold_str = model.split("-", 2)
+            threshold = float(threshold_str)
+        except Exception as e:
+            raise RoutingError(f"Invalid model format: {model}. Expected 'router-[router_name]-[threshold]'.") from e
         return router, threshold
 
     def _get_routed_model_for_completion(
         self, messages: list, router: str, threshold: float
-    ):
-        # Look at the last turn for routing.
-        # Our current routers were only trained on first turn data, so more research is required here.
+    ) -> Union[str, Dict[str, Any]]:
         prompt = messages[-1]["content"]
         routed_model = self.routers[router].route(prompt, threshold, self.model_pair)
-
-        self.model_counts[router][routed_model] += 1
-
+        self.model_counts[router][str(routed_model)] += 1
         return routed_model
 
-    # Mainly used for evaluations
+    # Mainly used for evaluations.
     def batch_calculate_win_rate(
         self,
         prompts: pd.Series,
@@ -131,40 +131,99 @@ class Controller:
 
     def route(self, prompt: str, router: str, threshold: float):
         self._validate_router_threshold(router, threshold)
-
         return self.routers[router].route(prompt, threshold, self.model_pair)
 
-    # Matches OpenAI's Chat Completions interface, but also supports optional router and threshold args
-    # If model name is present, attempt to parse router and threshold using it, otherwise, use the router and threshold args
-    def completion(
-        self,
-        *,
-        router: Optional[str] = None,
-        threshold: Optional[float] = None,
-        **kwargs,
-    ):
+    def completion(self, *, router: Optional[str] = None, threshold: Optional[float] = None, **kwargs):
+        # If model parameter is passed, parse it to extract router and threshold.
         if "model" in kwargs:
             router, threshold = self._parse_model_name(kwargs["model"])
-
         self._validate_router_threshold(router, threshold)
-        kwargs["model"] = self._get_routed_model_for_completion(
-            kwargs["messages"], router, threshold
-        )
-        return completion(api_base=self.api_base, api_key=self.api_key, **kwargs)
 
-    # Matches OpenAI's Async Chat Completions interface, but also supports optional router and threshold args
-    async def acompletion(
-        self,
-        *,
-        router: Optional[str] = None,
-        threshold: Optional[float] = None,
-        **kwargs,
-    ):
+        # Get the routed result.
+        routed_result = self._get_routed_model_for_completion(kwargs["messages"], router, threshold)
+        # If the routed result includes a direct answer and does not require routing forward, handle it.
+        if isinstance(routed_result, dict) and "answer" in routed_result and routed_result["routeforward"] is False:
+            return {
+                "id": f"chatcmpl-{shortuuid.random()}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": "self_answer",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": routed_result["answer"]
+                        },
+                        "finish_reason": "stop"
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": routed_result.get("input_tokens", 0),
+                    "completion_tokens": routed_result.get("output_tokens", 0),
+                    "total_tokens": routed_result.get("input_tokens", 0) + routed_result.get("output_tokens", 0)
+                },
+                "complexity": routed_result
+            }
+
+        # If routed_result is a dict but no direct answer, extract a model string.
+        if isinstance(routed_result, dict):
+            model_str = routed_result.get("model_string", None)
+            if model_str is None:
+                raise RoutingError("Missing model string in routing result.")
+            kwargs["model"] = model_str
+        else:
+            kwargs["model"] = routed_result  # It's already a string.
+
+        # Prepare parameters for the LLM provider.
+        params = {"api_base": self.api_base, "api_key": self.api_key}
+        if self.api_version:
+            params["api_version"] = self.api_version
+        params.update(kwargs)
+        return completion(**params)
+
+    async def acompletion(self, *, router: Optional[str] = None, threshold: Optional[float] = None, **kwargs):
         if "model" in kwargs:
             router, threshold = self._parse_model_name(kwargs["model"])
-
         self._validate_router_threshold(router, threshold)
-        kwargs["model"] = self._get_routed_model_for_completion(
-            kwargs["messages"], router, threshold
-        )
-        return await acompletion(api_base=self.api_base, api_key=self.api_key, **kwargs)
+
+        routed_result = self._get_routed_model_for_completion(kwargs["messages"], router, threshold)
+        # Check for direct answer path.
+        if isinstance(routed_result, dict) and "answer" in routed_result and routed_result["routeforward"] is False:
+            return {
+                "id": f"chatcmpl-{shortuuid.random()}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": "self_answer",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": routed_result["answer"]
+                        },
+                        "finish_reason": "stop"
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": routed_result.get("input_tokens", 0),
+                    "completion_tokens": routed_result.get("output_tokens", 0),
+                    "total_tokens": routed_result.get("input_tokens", 0) + routed_result.get("output_tokens", 0)
+                },
+                "complexity": routed_result
+            }
+
+        # Extract model string if necessary.
+        if isinstance(routed_result, dict):
+            model_str = routed_result.get("model_string", None)
+            if model_str is None:
+                raise RoutingError("Missing model string in routing result.")
+            kwargs["model"] = model_str
+        else:
+            kwargs["model"] = routed_result
+
+        params = {"api_base": self.api_base, "api_key": self.api_key}
+        if self.api_version:
+            params["api_version"] = self.api_version
+        params.update(kwargs)
+        return await acompletion(**params)

@@ -22,6 +22,10 @@ from pydantic import BaseModel, Field
 from routellm.controller import Controller, RoutingError
 from routellm.routers.routers import ROUTER_CLS
 
+import litellm
+litellm._turn_on_debug()
+
+
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 CONTROLLER = None
 
