@@ -9,6 +9,7 @@ import shortuuid  # make sure you have this module installed
 from litellm import acompletion, completion
 import litellm
 from tqdm import tqdm
+from routellm.judge import Judge
 
 # Set drop_params if required by your setup
 litellm.drop_params = True
@@ -17,7 +18,7 @@ litellm.drop_params = True
 GPT_4_AUGMENTED_CONFIG = {
     "sw_ranking": {
         "arena_battle_datasets": [
-            "lmsys/lmsys-arena-human-preference-55k",
+            "routellm/lmsys-arena-human-preference-55k-thresholds",
             "routellm/gpt4_judge_battles",
         ],
         "arena_embedding_datasets": [
@@ -43,15 +44,15 @@ class ModelPair:
 
 class Controller:
     def __init__(
-        self,
-        routers: list[str],
-        strong_model: str,
-        weak_model: str,
-        config: Optional[dict[str, dict[str, Any]]] = None,
-        api_base: Optional[str] = None,
-        api_key: Optional[str] = None,
-        progress_bar: bool = False,
-        api_version: Optional[str] = None,  # NEW optional parameter
+            self,
+            routers: list[str],
+            strong_model: str,
+            weak_model: str,
+            config: Optional[dict[str, dict[str, Any]]] = None,
+            api_base: Optional[str] = None,
+            api_key: Optional[str] = None,
+            progress_bar: bool = False,
+            api_version: Optional[str] = None,  # NEW optional parameter
     ):
         self.model_pair = ModelPair(strong=strong_model, weak=weak_model)
         self.routers = {}
@@ -79,12 +80,12 @@ class Controller:
         # Create a chat namespace resembling the OpenAI Python SDK interface.
         self.chat = SimpleNamespace(
             completions=SimpleNamespace(
-                create=self.completion, acreate=self.acompletion
+                create=self.completion, acreate=self.acompletion, create_with_judge=self.completion_with_judge
             )
         )
 
     def _validate_router_threshold(
-        self, router: Optional[str], threshold: Optional[float]
+            self, router: Optional[str], threshold: Optional[float]
     ):
         if router is None or threshold is None:
             raise RoutingError("Router or threshold unspecified.")
@@ -107,7 +108,7 @@ class Controller:
         return router, threshold
 
     def _get_routed_model_for_completion(
-        self, messages: list, router: str, threshold: float
+            self, messages: list, router: str, threshold: float
     ) -> Union[str, Dict[str, Any]]:
         prompt = messages[-1]["content"]
         routed_model = self.routers[router].route(prompt, threshold, self.model_pair)
@@ -116,9 +117,9 @@ class Controller:
 
     # Mainly used for evaluations.
     def batch_calculate_win_rate(
-        self,
-        prompts: pd.Series,
-        router: str,
+            self,
+            prompts: pd.Series,
+            router: str,
     ):
         self._validate_router_threshold(router, 0)
         router_instance = self.routers[router]
@@ -181,6 +182,92 @@ class Controller:
             params["api_version"] = self.api_version
         params.update(kwargs)
         return completion(**params)
+
+    def is_weak_model(self, model_name: str) -> bool:
+        """
+        Check if the given model is the weak model in this controller.
+        """
+        return model_name.lower() == self.model_pair.weak.lower()
+
+    def completion_with_judge(self, *, router: Optional[str] = None, threshold: Optional[float] = None, **kwargs):
+        # If model parameter is passed, parse it to extract router and threshold.
+        if "model" in kwargs:
+            router, threshold = self._parse_model_name(kwargs["model"])
+        self._validate_router_threshold(router, threshold)
+
+        # Get the routed result.
+        routed_result = self._get_routed_model_for_completion(kwargs["messages"], router, threshold)
+        # If the routed result includes a direct answer and does not require routing forward, handle it.
+        if isinstance(routed_result, dict) and "answer" in routed_result and routed_result["routeforward"] is False:
+            return {
+                "id": f"chatcmpl-{shortuuid.random()}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": "self_answer",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": routed_result["answer"]
+                        },
+                        "finish_reason": "stop"
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": routed_result.get("input_tokens", 0),
+                    "completion_tokens": routed_result.get("output_tokens", 0),
+                    "total_tokens": routed_result.get("input_tokens", 0) + routed_result.get("output_tokens", 0)
+                },
+                "complexity": routed_result
+            }
+
+        # If routed_result is a dict but no direct answer, extract a model string.
+        if isinstance(routed_result, dict):
+            model_str = routed_result.get("model_string", None)
+            if model_str is None:
+                raise RoutingError("Missing model string in routing result.")
+            kwargs["model"] = model_str
+        else:
+            kwargs["model"] = routed_result  # It's already a string.
+
+        # It routed to weak model
+        routed_model_name = routed_result if isinstance(routed_result, str) else routed_result["model_string"]
+        if self.is_weak_model(routed_model_name):
+            weak_response = self.call_model(routed_result, kwargs)
+            judge = Judge()
+            user_prompt = kwargs["messages"][-1]["content"]
+            score = judge.judge(user_prompt, weak_response)
+
+            if judge.should_reroute(score):
+                print("Re-routing to strong model due to low quality.")
+                kwargs["model"] = self.model_pair.strong
+                return completion(**kwargs)
+            else:
+                # return weak model response
+                print(f"Weak model response has good quality, score:{score}")
+                pass
+        # If routed to strong model already
+        else:
+            pass
+
+        # Prepare parameters for the LLM provider.
+        params = {"api_base": self.api_base, "api_key": self.api_key}
+        if self.api_version:
+            params["api_version"] = self.api_version
+        params.update(kwargs)
+        return completion(**params)
+
+    def call_model(self, model_name: str, kwargs: dict) -> str:
+        """
+        Actually calls the LLM API with given model_name and prompt (inside kwargs),
+        and returns the model's reply as a string.
+        """
+        params = kwargs.copy()
+        params["model"] = model_name
+
+        response = completion(**params)
+        return response["choices"][0]["message"]["content"]
 
     async def acompletion(self, *, router: Optional[str] = None, threshold: Optional[float] = None, **kwargs):
         if "model" in kwargs:
