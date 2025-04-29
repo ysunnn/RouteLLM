@@ -24,7 +24,7 @@ class Judge:
             self,
             model_type: str = "local",
             model_name: str = "llama3",
-            threshold: float = 0.7,
+            threshold: float = 0.8,
             api_key: Optional[str] = None
     ):
         self.model_type = model_type
