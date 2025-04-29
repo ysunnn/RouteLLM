@@ -9,7 +9,7 @@ import yaml
 from pandarallel import pandarallel
 
 from routellm.controller import Controller
-from routellm.evals.benchmarks import GSM8K, MMLU, MTBench
+from routellm.evals.benchmarks import GSM8K, MMLU, MTBench, JUDGEDGSM8K
 from routellm.evals.mmlu.domains import ALL_MMLU_DOMAINS
 from routellm.routers.routers import ROUTER_CLS
 
@@ -160,6 +160,7 @@ if __name__ == "__main__":
             "mmlu",
             "mt-bench",
             "gsm8k",
+            "gsm8k_with_judge",
         ],
     )
     parser.add_argument(
@@ -212,6 +213,9 @@ if __name__ == "__main__":
     elif args.benchmark == "gsm8k":
         print("Running eval for GSM8k.")
         benchmark = GSM8K(controller.model_pair, args.overwrite_cache)
+    elif args.benchmark == "gsm8k_with_judge":
+        print("Running eval for GSM8k.")
+        benchmark = JUDGEDGSM8K(controller.model_pair, args.overwrite_cache)
     else:
         raise ValueError(f"Invalid benchmark {args.benchmark}")
 
@@ -267,6 +271,6 @@ if __name__ == "__main__":
         all_results,
         benchmark,
         args.benchmark,
-        controller.model_pair.strong,
+        controller.model_pair,
         args.output,
     )
