@@ -1,0 +1,14 @@
+# Azure‐compatible API server
+fastapi>=0.95.2
+uvicorn[standard]>=0.22.0
+pydantic>=1.10.4
+PyYAML>=6.0
+shortuuid>=1.0.11
+
+# Core routing & LLM client
+routellm>=0.1.0      # your local package; adjust if necessary
+litellm>=0.1.0       # if Controller uses LiteLLM under the hood
+
+# (Optional) logging and async HTTP client backends, if used downstream
+# httpx>=0.24.0
+# anyio>=3.7.0

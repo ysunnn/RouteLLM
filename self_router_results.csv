@@ -1,0 +1,2 @@
+router,threshold,total_calls,strong_calls,weak_calls,pct_strong,strong_prompt_tokens,strong_completion_tokens,weak_prompt_tokens,weak_completion_tokens,cost_strong_prompt_usd,cost_strong_completion_usd,cost_weak_prompt_usd,cost_weak_completion_usd,cost_total_usd
+complexity_self_answer_router,0.5,10,0,10,0.0,0,0,6109,1649,0.0,0.0,0.0006109,0.0006596000000000001,0.0012705000000000001
