@@ -314,10 +314,10 @@ class ComplexityAzureRouter(Router):
         Initializes the ComplexityAzureRouter with hard-coded Azure OpenAI configuration.
         """
         # Hard-coded values based on your Azure deployment info.
-        self.deployment_id = "gpt-4o20240806"
-        self.resource_name = "ti-data-sw"
-        self.api_version = "2024-12-01-preview"
-        self.azure_api_key = ""
+        self.deployment_id  = os.getenv(DEPLOYMENT_ID_ENV)
+        self.resource_name  = os.getenv(RESOURCE_NAME_ENV)
+        self.api_version    = os.getenv(API_VERSION_ENV)
+        self.azure_api_key  = os.getenv(AZURE_API_KEY_ENV)
         
         # Construct the Azure OpenAI endpoint URL using the chat completions endpoint.
         self.api_url = (
@@ -349,6 +349,8 @@ class ComplexityAzureRouter(Router):
         Computes the average of these 32 scores and logs the prompt, individual scores, and average score to a CSV file.
         Returns the average score.
         """
+        input_tokens = 0
+        output_tokens = 0
         system_prompt = ("You are an expert prompt complexity analyzer (each 1 to 9). Evaluate the  prompt and return a JSON object. Use  abbreviations in output:: wc: word count complexity; ssc: sentence structure complexity; vd: vocabulary diversity; sc: syntactic complexity; sd: semantic depth; ca: conceptual abstraction; lf: logical flow; ac: argumentation complexity; tc: technicality; ni: numerical information; mu: metaphor usage; cr: cultural references; ie: idiomatic expressions; ap: ambiguous phrases; cd: context dependency; it: intertextuality; rq: rhetorical questions; ps: perspective shift; tr: temporal references; spr: spatial references; cer: cause-effect relationship; hs: hypothetical scenarios; crr: counterfactual reasoning; ec: ethical complexity; ei: emotional intensity; hu: humor usage; sl: sarcasm level; cdm: creativity demand; inf: inferential demand; dd: detail density; nc: narrative complexity; ifa: integration of facts.")
 
         # Build the chat messages required by the Azure chat completions endpoint.
@@ -495,10 +497,10 @@ class ComplexityAzureRouter(Router):
 
 class ComplexitySelfAnswerRouter(Router):
     def __init__(self, **kwargs):
-        self.deployment_id = "gpt-4o20240806"
-        self.resource_name = "ti-data-sw"
-        self.api_version = "2024-12-01-preview"
-        self.azure_api_key = ""
+        self.deployment_id  = os.getenv(DEPLOYMENT_ID_ENV)
+        self.resource_name  = os.getenv(RESOURCE_NAME_ENV)
+        self.api_version    = os.getenv(API_VERSION_ENV)
+        self.azure_api_key  = os.getenv(AZURE_API_KEY_ENV)
         self.api_url = (
             f"https://{self.resource_name}.openai.azure.com/openai/deployments/"
             f"{self.deployment_id}/chat/completions?api-version={self.api_version}"
