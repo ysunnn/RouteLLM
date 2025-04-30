@@ -18,7 +18,7 @@ litellm.drop_params = True
 GPT_4_AUGMENTED_CONFIG = {
     "sw_ranking": {
         "arena_battle_datasets": [
-            "routellm/lmsys-arena-human-preference-55k-thresholds",
+            "lmsys/lmsys-arena-human-preference-55k",
             "routellm/gpt4_judge_battles",
         ],
         "arena_embedding_datasets": [

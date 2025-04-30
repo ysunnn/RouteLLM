@@ -67,6 +67,7 @@ def generate_results(
 
     plt.xlabel("Strong Model Calls (%)")
     plt.ylabel("Performance")
+    plt.xlim(xmin=0)
     plt.title(f"Router Performance ({benchmark_name})")
     plt.legend()
 
